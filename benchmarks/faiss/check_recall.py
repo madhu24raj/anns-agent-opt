@@ -31,7 +31,7 @@ def recall_at_k(I_approx: np.ndarray, I_exact: np.ndarray, k: int) -> float:
 
 
 def main(n=200_000, d=64, nq=2_000, k=20):
-    _, xb = build_index(d, n)
+    candidate, xb = build_index(d, n)
     xq = make_queries(d, nq)
 
     # ground truth: exact brute-force
@@ -39,12 +39,8 @@ def main(n=200_000, d=64, nq=2_000, k=20):
     flat.add(xb)
     _, I_exact = flat.search(xq, k)
 
-    # example approximate index -- swap this for whatever the agent produces
-    ivf = faiss.IndexIVFFlat(faiss.IndexFlatL2(d), d, 100)
-    ivf.train(xb)
-    ivf.add(xb)
-    ivf.nprobe = 8
-    _, I_approx = ivf.search(xq, k)
+    # Candidate under test: use the same index configuration as perf_script.
+    _, I_approx = candidate.search(xq, k)
 
     r = recall_at_k(I_approx, I_exact, k)
     print(f"recall@{k}: {r:.4f}")
