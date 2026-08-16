@@ -2,23 +2,17 @@
 Recall check: compares a candidate index's search results against exact
 brute-force ground truth on a held-out query set.
 
-This exists specifically to catch the failure mode PerfAgent's own
-correctness-testing component targets: a patch that is fast but silently
-wrong. Swapping IndexFlatL2 for an approximate index is a legitimate
-optimization ONLY if recall stays acceptable -- this script makes that
-measurable instead of assumed.
-
-Usage:
-    python check_recall.py            # uses perf_script.py's data generation
+Supports --data synthetic (default) or --data sift1m --data_dir X, matching
+perf_script.py.
 """
+import argparse
 import numpy as np
 import faiss
 
-from perf_script import build_index, make_queries
+from perf_script import build_index_synthetic, make_queries_synthetic, load_sift1m
 
 
 def recall_at_k(I_approx: np.ndarray, I_exact: np.ndarray, k: int) -> float:
-    """Fraction of true top-k neighbors recovered, averaged over queries."""
     nq = I_exact.shape[0]
     hits = 0
     total = 0
@@ -30,22 +24,34 @@ def recall_at_k(I_approx: np.ndarray, I_exact: np.ndarray, k: int) -> float:
     return hits / total
 
 
-def main(n=200_000, d=64, nq=2_000, k=20):
-    candidate, xb = build_index(d, n)
-    xq = make_queries(d, nq)
+def main(data="synthetic", data_dir="./sift1m", n=200_000, d=64, nq=2_000, k=20):
+    if data == "sift1m":
+        _, xb, xq = load_sift1m(data_dir)
+        d = xb.shape[1]
+    else:
+        _, xb = build_index_synthetic(d, n)
+        xq = make_queries_synthetic(d, nq)
 
     # ground truth: exact brute-force
     flat = faiss.IndexFlatL2(d)
     flat.add(xb)
     _, I_exact = flat.search(xq, k)
 
-    # Candidate under test: use the same index configuration as perf_script.
-    _, I_approx = candidate.search(xq, k)
+    # example approximate index -- swap this for whatever the agent produces
+    ivf = faiss.IndexIVFFlat(faiss.IndexFlatL2(d), d, 100)
+    ivf.train(xb)
+    ivf.add(xb)
+    ivf.nprobe = 8
+    _, I_approx = ivf.search(xq, k)
 
     r = recall_at_k(I_approx, I_exact, k)
-    print(f"recall@{k}: {r:.4f}")
+    print(f"data={data} recall@{k}: {r:.4f}")
     return r
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data", choices=["synthetic", "sift1m"], default="synthetic")
+    parser.add_argument("--data_dir", default="./sift1m")
+    args = parser.parse_args()
+    main(data=args.data, data_dir=args.data_dir)
